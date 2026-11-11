@@ -21,6 +21,11 @@ describe("extractTitle", () => {
     expect(extractTitle("<html><head></head></html>")).toBeNull();
     expect(extractTitle("<title>   </title>")).toBeNull();
   });
+
+  it("keeps angle brackets that are part of the title text", () => {
+    expect(extractTitle("<title>Using <canvas> for graphs</title>")).toBe("Using <canvas> for graphs");
+    expect(extractTitle("<title>Using &lt;canvas&gt; for graphs</title>")).toBe("Using <canvas> for graphs");
+  });
 });
 
 describe("fetchPageTitle", () => {
@@ -149,4 +154,43 @@ describe("fetchPageTitle", () => {
   it("rejects a timeout outside the allowed range", async () => {
     await expect(fetchPageTitle("https://example.com/", { timeoutMs: 50 })).rejects.toThrow(/timeoutMs/);
   });
+
+  it("decodes the title with the charset declared on the response", async () => {
+    const bytes = Uint8Array.from([...Buffer.from("<title>Caf"), 0xe9, ...Buffer.from("</title>")]);
+    const result = await fetchPageTitle("https://example.com/", {
+      lookupImpl: async () => PUBLIC,
+      fetchImpl: async () => htmlStream(bytes, "text/html; charset=iso-8859-1"),
+    });
+    expect(result.title).toBe("Café");
+  });
+
+  it("ignores a title that begins past the 64 KiB body cap", async () => {
+    const bytes = Buffer.concat([Buffer.alloc(100_000, 0x20), Buffer.from("<title>past limit</title>")]);
+    const result = await fetchPageTitle("https://example.com/", {
+      lookupImpl: async () => PUBLIC,
+      fetchImpl: async () => htmlStream(bytes, "text/html; charset=utf-8"),
+    });
+    expect(result.title).toBeNull();
+  });
+
+  it("reads a title that sits inside the first 64 KiB of a large chunk", async () => {
+    const bytes = Buffer.concat([Buffer.from("<title>Inside</title>"), Buffer.alloc(100_000, 0x20)]);
+    const result = await fetchPageTitle("https://example.com/", {
+      lookupImpl: async () => PUBLIC,
+      fetchImpl: async () => htmlStream(bytes, "text/html; charset=utf-8"),
+    });
+    expect(result.title).toBe("Inside");
+  });
 });
+
+function htmlStream(bytes: Uint8Array, contentType: string): Response {
+  return new Response(
+    new ReadableStream({
+      start(controller) {
+        controller.enqueue(bytes);
+        controller.close();
+      },
+    }),
+    { status: 200, headers: { "content-type": contentType } },
+  );
+}

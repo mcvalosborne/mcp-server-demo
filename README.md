@@ -26,7 +26,7 @@ The client sends JSON-RPC on stdin and reads responses from stdout. The server r
 
 `convert_units` accepts `mm`, `cm`, `m`, `km`, `in`, `ft`, `yd`, `mi`; `mg`, `g`, `kg`, `oz`, `lb`; and `C`, `F`, `K`, plus ordinary names such as `meter` and `pound`. Units from different categories are rejected.
 
-`fetch_page_title` allows only `http` and `https`. It rejects loopback, link-local, and private addresses, and names that resolve to those addresses, including on redirects. The request aborts at the timeout. Body reading stops at the title element or at 64 KiB. The check uses the addresses returned for that lookup; it does not re-check if DNS changes before the connection is made.
+`fetch_page_title` allows only `http` and `https`. It rejects loopback, link-local, and private addresses, and names that resolve to those addresses, including on redirects. The request aborts at the timeout. Body reading stops at the title element or at 64 KiB, and those bytes are decoded with the charset on the Content-Type header, or UTF-8 when the header does not name one. The check uses the addresses returned for that lookup; it does not re-check if DNS changes before the connection is made.
 
 The `server-info` resource at `info://server` returns the server name, version, and tool list as JSON.
 

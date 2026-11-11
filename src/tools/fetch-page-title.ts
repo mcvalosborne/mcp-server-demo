@@ -72,9 +72,7 @@ export function extractTitle(html: string): string | null {
   const match = /<title[^>]*>([\s\S]*?)<\/title>/i.exec(html);
   const raw = match?.[1];
   if (raw === undefined) return null;
-  const title = decodeHtml(raw.replace(/<[^>]*>/g, ""))
-    .replace(/\s+/g, " ")
-    .trim();
+  const title = decodeHtml(raw).replace(/\s+/g, " ").trim();
   return title.length > 0 ? title : null;
 }
 
@@ -146,12 +144,13 @@ async function loadTitle(
 
     const finalUrl = response.url || current.href;
     const status = response.status;
-    if (!isTextDocument(response.headers.get("content-type"))) {
+    const contentType = response.headers.get("content-type");
+    if (!isTextDocument(contentType)) {
       await discard(response);
       return { url: finalUrl, status, title: null };
     }
 
-    const html = await readLimited(response);
+    const html = await readLimited(response, charsetFrom(contentType));
     return { url: finalUrl, status, title: extractTitle(html) };
   }
 }
@@ -250,19 +249,21 @@ function isTextDocument(contentType: string | null): boolean {
   );
 }
 
-async function readLimited(response: Response): Promise<string> {
+async function readLimited(response: Response, charset: string): Promise<string> {
   const reader = response.body?.getReader();
   if (!reader) return "";
-  const decoder = new TextDecoder();
+  const decoder = decoderFor(charset);
   let received = 0;
   let html = "";
   try {
     while (received < MAX_BYTES) {
       const { done, value } = await reader.read();
       if (done) break;
-      if (!value) continue;
-      received += value.byteLength;
-      html += decoder.decode(value, { stream: true });
+      if (!value || value.byteLength === 0) continue;
+      const remaining = MAX_BYTES - received;
+      const chunk = value.byteLength > remaining ? value.subarray(0, remaining) : value;
+      received += chunk.byteLength;
+      html += decoder.decode(chunk, { stream: true });
       if (TITLE_OR_HEAD.test(html)) break;
     }
   } finally {
@@ -270,6 +271,19 @@ async function readLimited(response: Response): Promise<string> {
     await reader.cancel().catch(() => undefined);
   }
   return html;
+}
+
+function charsetFrom(contentType: string | null): string {
+  const match = /charset\s*=\s*(?:"([^"]+)"|'([^']+)'|([^;\s]+))/i.exec(contentType ?? "");
+  return (match?.[1] ?? match?.[2] ?? match?.[3] ?? "utf-8").trim() || "utf-8";
+}
+
+function decoderFor(charset: string) {
+  try {
+    return new TextDecoder(charset);
+  } catch {
+    return new TextDecoder();
+  }
 }
 
 async function discard(response: Response): Promise<void> {
